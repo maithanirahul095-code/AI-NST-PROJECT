@@ -1,6 +1,10 @@
-﻿__pycache__/
+﻿venv/
+**/static/uploads/*
+!**/static/uploads/.gitkeep
+__pycache__/
 .env
 *.csv
 *.pth
 *.pkl
 *.zip
+*.ipynb_checkpoints/

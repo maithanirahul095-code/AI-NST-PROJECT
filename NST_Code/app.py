@@ -1,4 +1,5 @@
 import os
+import sys
 import torch
 from flask import Flask, render_template, request, redirect, url_for, send_from_directory
 from flask_wtf import FlaskForm
@@ -8,20 +9,27 @@ from wtforms import FileField, SubmitField, FloatField, HiddenField
 from wtforms.validators import InputRequired
 from PIL import Image
 from torchvision import transforms
-import io
 
-# Import your existing AdaIN code
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from utils.models import VGGEncoder, Decoder
 from utils.utils import adaptive_instance_normalization, calc_mean_std
 
+# Get the directory where app.py is located
+base_dir = os.path.dirname(os.path.abspath(__file__))
+
+# Build correct paths to the weight files
+vgg_path = os.path.join(base_dir,  'vgg_normalised.pth')
+decoder_path = os.path.join(base_dir, "experiment", "final_exp", 'decoder_final.pth')
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'supersecretkey'
-app.config['UPLOAD_FOLDER'] = 'static/uploads'
+app.config['UPLOAD_FOLDER'] = os.path.join(base_dir, 'static', 'uploads')
 app.config['ALLOWED_EXTENSIONS'] = {'png', 'jpg', 'jpeg'}
 Bootstrap(app)
 
 os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
+
 
 class UploadForm(FlaskForm):
     content = FileField('Content Image')
@@ -31,18 +39,22 @@ class UploadForm(FlaskForm):
     alpha = FloatField('Alpha', default=1.0)
     submit = SubmitField('Transfer Style')
 
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-encoder = VGGEncoder('vgg_normalised.pth').to(device)
+# Initialize encoder/decoder once, using correct paths
+encoder = VGGEncoder(vgg_path).to(device)
 decoder = Decoder().to(device)
-decoder.load_state_dict(torch.load('/home/ubuntu/Desktop/NST_Code/experiment/final_exp/decoder_final.pth'))
+decoder.load_state_dict(torch.load(decoder_path, map_location=device))
 
 encoder.eval()
 decoder.eval()
 
+
 def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in app.config['ALLOWED_EXTENSIONS']
+
 
 def style_transfer(content_image, style_image, encoder, decoder, alpha, device):
     content_transform = transforms.Compose([
@@ -78,7 +90,6 @@ def save_image(image, path):
     image.save(path)
 
 
-
 @app.route('/', methods=['GET', 'POST'])
 def index():
     form = UploadForm()
@@ -87,7 +98,13 @@ def index():
     style_filename = None
     error = None
 
+    print("=== REQUEST METHOD:", request.method, "===")
+
+    if request.method == 'POST':
+        print("=== FORM SUBMITTED, validating... ===")
+
     if form.validate_on_submit():
+        print("=== VALIDATION PASSED ===")
         if form.content.data and form.content.data.filename:
             if allowed_file(form.content.data.filename):
                 content_filename = secure_filename(form.content.data.filename)
@@ -104,10 +121,12 @@ def index():
         else:
             style_filename = form.style_path.data
 
+        print("=== content_filename:", content_filename, "style_filename:", style_filename, "===")
+
         if content_filename and style_filename:
             content_path = os.path.join(app.config['UPLOAD_FOLDER'], content_filename)
             style_path = os.path.join(app.config['UPLOAD_FOLDER'], style_filename)
-            
+
             try:
                 content_image = Image.open(content_path).convert('RGB')
                 style_image = Image.open(style_path).convert('RGB')
@@ -118,11 +137,16 @@ def index():
                 result_filename = 'stylized_' + content_filename
                 result_path = os.path.join(app.config['UPLOAD_FOLDER'], result_filename)
                 save_image(stylized_image, result_path)
-                
+
                 result_image = result_filename
+                print("=== SUCCESS, result:", result_filename, "===")
             except Exception as e:
+                import traceback
+                traceback.print_exc()
                 error = str(e)
     else:
+        if request.method == 'POST':
+            print("=== FORM ERRORS:", form.errors, "===")
         if not content_filename:
             error = 'Please upload content image'
         if not style_filename:
@@ -145,9 +169,3 @@ def send_example(filename):
 if __name__ == '__main__':
     from werkzeug.serving import run_simple
     run_simple('localhost', 5000, app, use_reloader=True, use_debugger=True)
-
-
-
-
-
-
